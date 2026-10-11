@@ -12,8 +12,8 @@
 // -----------------------------------------------------------------------------
 
 import { createLogger } from '@gladysassistant/integration-sdk';
-import { resolveTarget, findOnOffFeature } from './deviceLookup.js';
-import { classify, readOnOff, assertExpectedDevice } from './tplink/model.js';
+import { resolveTarget, findOnOffFeature, findBrightnessFeature } from './deviceLookup.js';
+import { classify, readOnOff, readBrightness, assertExpectedDevice } from './tplink/model.js';
 import { publishFeatureState, publishDeviceTransport } from './statePublisher.js';
 import { TRANSPORTS } from './constants.js';
 import { toUserFacingError } from './errors.js';
@@ -64,4 +64,12 @@ export async function handlePoll(gladys, tpClient, device) {
 
   logger.debug(`Poll ${device.external_id} -> ${state} (${host})`);
   await publishFeatureState(gladys, feature.external_id, state, readAt);
+
+  // A device discovered before dimmers were supported has no brightness feature
+  // yet (it appears after a rescan): nothing to publish to, so nothing is.
+  const brightnessFeature = findBrightnessFeature(full);
+  const brightness = readBrightness(sysInfo);
+  if (brightnessFeature && brightness !== undefined) {
+    await publishFeatureState(gladys, brightnessFeature.external_id, brightness, readAt);
+  }
 }

@@ -1,8 +1,10 @@
 // -----------------------------------------------------------------------------
 // Minimal in-memory stand-in for the TP-Link client wrapper (src/tplink/client.js).
 //
-//   - getSysInfo(host)       -> returns the sysinfo mapped to that host, or throws
-//   - setPowerState(host,on) -> records the command
+//   - getSysInfo(host)            -> returns the sysinfo mapped to that host, or throws
+//   - setPowerState(host,on)      -> records the command
+//   - setBrightness(host,level)   -> records the level, and the power-on the real
+//                                    client sends when the dimmer was off
 //
 // Also provides discoveryReply(): a real encrypted `udp-active-broadcast` scan
 // result for a sysinfo, so discovery tests exercise the actual codec.
@@ -27,6 +29,7 @@ export function discoveryReply(sourceIp, sysInfo) {
 
 export function createFakeTpLink({ byHost = {} } = {}) {
   const powerCommands = [];
+  const brightnessCommands = [];
 
   function read(host) {
     const sysInfo = byHost[host];
@@ -40,6 +43,7 @@ export function createFakeTpLink({ byHost = {} } = {}) {
 
   return {
     powerCommands,
+    brightnessCommands,
 
     async getSysInfo(host) {
       return read(host);
@@ -54,6 +58,16 @@ export function createFakeTpLink({ byHost = {} } = {}) {
         ? { ...sysInfo, light_state: { ...sysInfo.light_state, on_off: on ? 1 : 0 } }
         : { ...sysInfo, relay_state: on ? 1 : 0 };
     },
+
+    async setBrightness(host, level, { expectedDeviceId } = {}) {
+      const sysInfo = read(host);
+      assertExpectedDevice(sysInfo, expectedDeviceId, host);
+      brightnessCommands.push({ host, level });
+      if (sysInfo.relay_state === 0) {
+        powerCommands.push({ host, on: true });
+      }
+      return { ...sysInfo, brightness: level, relay_state: 1 };
+    },
   };
 }
 
@@ -64,6 +78,16 @@ export const PLUG_SYSINFO = {
   model: 'HS100(EU)',
   type: 'IOT.SMARTPLUGSWITCH',
   relay_state: 1,
+};
+
+// A dimmer plug (HS220, ES20M): a plug that also reports a brightness.
+export const DIMMER_SYSINFO = {
+  deviceId: 'DIMMER0001',
+  alias: 'Kitchen dimmer',
+  model: 'HS220(US)',
+  type: 'IOT.SMARTPLUGSWITCH',
+  relay_state: 1,
+  brightness: 60,
 };
 
 export const BULB_SYSINFO = {

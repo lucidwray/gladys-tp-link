@@ -12,7 +12,11 @@
 // `params`, the way the core carried TP_LINK_IP_ADDRESS / SERIAL_NUMBER.
 // -----------------------------------------------------------------------------
 
-import { DEVICE_FEATURE_CATEGORIES, DEVICE_FEATURE_TYPES } from '@gladysassistant/integration-sdk';
+import {
+  DEVICE_FEATURE_CATEGORIES,
+  DEVICE_FEATURE_TYPES,
+  DEVICE_FEATURE_UNITS,
+} from '@gladysassistant/integration-sdk';
 import { DEVICE_KINDS, FEATURE_KEYS, PARAMS, TP_LINK_DEVICE_TYPES } from '../constants.js';
 
 /**
@@ -53,6 +57,17 @@ export function readOnOff(kind, sysInfo) {
     return sysInfo.light_state?.on_off;
   }
   return undefined;
+}
+
+/**
+ * Read the brightness out of a sysinfo, when the device reports one (dimmers).
+ * @param {object} sysInfo - The TP-Link `sysinfo` object.
+ * @returns {number|undefined} The brightness (0-100), or undefined when absent.
+ * @example
+ * readBrightness({ brightness: 60 }); // 60
+ */
+export function readBrightness(sysInfo) {
+  return Number.isFinite(sysInfo?.brightness) ? sysInfo.brightness : undefined;
 }
 
 /**
@@ -121,6 +136,21 @@ export function buildDevice(gladys, sysInfo, host, config) {
       has_feedback: true,
       keep_history: true,
     });
+    // Only a dimmer reports a brightness: plugs without one keep their single feature.
+    if (readBrightness(sysInfo) !== undefined) {
+      device.features.push({
+        name: `${alias} Brightness`,
+        external_id: ids.feature(FEATURE_KEYS.BRIGHTNESS),
+        category: DEVICE_FEATURE_CATEGORIES.SWITCH,
+        type: DEVICE_FEATURE_TYPES.SWITCH.DIMMER,
+        min: 1,
+        max: 100,
+        unit: DEVICE_FEATURE_UNITS.PERCENT,
+        read_only: false,
+        has_feedback: true,
+        keep_history: true,
+      });
+    }
     return { kind, device };
   }
 

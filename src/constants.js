@@ -23,9 +23,11 @@ export const DEVICE_KINDS = {
 };
 
 // Feature key (last segment of the feature external_id). A Kasa plug/bulb here
-// exposes a single controllable ON/OFF feature.
+// exposes a controllable ON/OFF feature; a dimmer plug (HS220, ES20M) also
+// exposes a BRIGHTNESS feature, added at discovery when sysinfo reports one.
 export const FEATURE_KEYS = {
   ON_OFF: 'on-off',
+  BRIGHTNESS: 'brightness',
 };
 
 // Device param names — same names the core used, so the concept maps 1:1.

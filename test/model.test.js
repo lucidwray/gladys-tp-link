@@ -1,11 +1,21 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEVICE_FEATURE_CATEGORIES, DEVICE_FEATURE_TYPES } from '@gladysassistant/integration-sdk';
-import { classify, buildDevice, readOnOff, assertExpectedDevice } from '../src/tplink/model.js';
+import {
+  DEVICE_FEATURE_CATEGORIES,
+  DEVICE_FEATURE_TYPES,
+  DEVICE_FEATURE_UNITS,
+} from '@gladysassistant/integration-sdk';
+import { classify, buildDevice, readOnOff, readBrightness, assertExpectedDevice } from '../src/tplink/model.js';
 import { DEVICE_KINDS, PARAMS, FEATURE_KEYS } from '../src/constants.js';
 import { normalizeConfig } from '../src/config.js';
 import { createFakeGladys } from './helpers/fakeGladys.js';
-import { PLUG_SYSINFO, BULB_SYSINFO, UNKNOWN_SYSINFO, POWER_STRIP_SYSINFO } from './helpers/fakeTpLink.js';
+import {
+  PLUG_SYSINFO,
+  BULB_SYSINFO,
+  UNKNOWN_SYSINFO,
+  POWER_STRIP_SYSINFO,
+  DIMMER_SYSINFO,
+} from './helpers/fakeTpLink.js';
 
 const gladys = createFakeGladys();
 const config = normalizeConfig({ poll_frequency: 30 });
@@ -36,6 +46,15 @@ test('readOnOff reads relay_state for a plug and light_state.on_off for a bulb',
   assert.equal(readOnOff(DEVICE_KINDS.UNKNOWN, {}), undefined);
 });
 
+test('readBrightness reads a numeric brightness and ignores anything else', () => {
+  assert.equal(readBrightness(DIMMER_SYSINFO), 60);
+  assert.equal(readBrightness({ brightness: 0 }), 0);
+  assert.equal(readBrightness(PLUG_SYSINFO), undefined);
+  assert.equal(readBrightness({ brightness: '60' }), undefined);
+  assert.equal(readBrightness({ brightness: NaN }), undefined);
+  assert.equal(readBrightness(null), undefined);
+});
+
 test('assertExpectedDevice rejects an address now held by another device', () => {
   assert.throws(
     () => assertExpectedDevice({ deviceId: 'OTHER' }, 'PLUG0001', '192.168.1.10'),
@@ -60,6 +79,41 @@ test('buildDevice(plug) produces a SWITCH/binary controllable feature', () => {
   assert.equal(feature.type, DEVICE_FEATURE_TYPES.SWITCH.BINARY);
   assert.equal(feature.external_id, `${device.external_id}:${FEATURE_KEYS.ON_OFF}`);
   assert.equal(feature.read_only, false);
+});
+
+test('buildDevice(dimmer) adds a SWITCH/dimmer brightness feature after the on-off one', () => {
+  const { kind, device } = buildDevice(gladys, DIMMER_SYSINFO, '192.168.1.20', config);
+  assert.equal(kind, DEVICE_KINDS.PLUG);
+  assert.equal(device.features.length, 2);
+
+  const [onOff, brightness] = device.features;
+  assert.equal(onOff.external_id, `${device.external_id}:${FEATURE_KEYS.ON_OFF}`);
+  assert.equal(onOff.type, DEVICE_FEATURE_TYPES.SWITCH.BINARY);
+
+  assert.equal(brightness.name, 'Kitchen dimmer Brightness');
+  assert.equal(brightness.external_id, `${device.external_id}:${FEATURE_KEYS.BRIGHTNESS}`);
+  assert.equal(brightness.category, DEVICE_FEATURE_CATEGORIES.SWITCH);
+  assert.equal(brightness.type, DEVICE_FEATURE_TYPES.SWITCH.DIMMER);
+  assert.equal(brightness.min, 1);
+  assert.equal(brightness.max, 100);
+  assert.equal(brightness.unit, DEVICE_FEATURE_UNITS.PERCENT);
+  assert.equal(brightness.read_only, false);
+  assert.equal(brightness.has_feedback, true);
+});
+
+test('buildDevice(plug) without a brightness keeps its single on-off feature', () => {
+  const { device } = buildDevice(gladys, PLUG_SYSINFO, '192.168.1.10', config);
+  assert.equal(device.features.length, 1);
+
+  // A brightness that is not a number is not a dimmer either.
+  const { device: notDimmer } = buildDevice(gladys, { ...PLUG_SYSINFO, brightness: '60' }, '192.168.1.10', config);
+  assert.equal(notDimmer.features.length, 1);
+});
+
+test('buildDevice(bulb) never gets a brightness feature', () => {
+  const { device } = buildDevice(gladys, { ...BULB_SYSINFO, brightness: 60 }, '192.168.1.11', config);
+  assert.equal(device.features.length, 1);
+  assert.equal(device.features[0].category, DEVICE_FEATURE_CATEGORIES.LIGHT);
 });
 
 test('buildDevice(plug) carries the IP, serial and model as params', () => {

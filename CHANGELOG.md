@@ -6,6 +6,10 @@ follows [Semantic Versioning](https://semver.org/) and the
 
 ## [Unreleased]
 
+### Added
+
+- Brightness control for Kasa dimmer switches (HS220, ES20M). Rescan the devices to get it on existing dimmers.
+
 ## [1.3.0] - 2026-09-23
 
 ### Fixed

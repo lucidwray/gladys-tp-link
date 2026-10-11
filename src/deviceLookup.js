@@ -8,7 +8,7 @@
 // `gladys.getDevices()` when needed.
 // -----------------------------------------------------------------------------
 
-import { DEVICE_FEATURE_CATEGORIES } from '@gladysassistant/integration-sdk';
+import { DEVICE_FEATURE_CATEGORIES, DEVICE_FEATURE_TYPES } from '@gladysassistant/integration-sdk';
 import { PARAMS } from './constants.js';
 
 /**
@@ -66,6 +66,8 @@ export async function resolveTarget(gladys, device) {
 
 /**
  * Find the ON/OFF feature of a TP-Link device (a switch or a light binary).
+ * A dimmer's brightness feature is also a switch, so the type must be binary:
+ * the first switch alone could return the brightness instead.
  * @param {object} device - A full Gladys device (with features).
  * @returns {object|undefined} The controllable feature, or undefined.
  * @example
@@ -73,6 +75,21 @@ export async function resolveTarget(gladys, device) {
  */
 export function findOnOffFeature(device) {
   return device?.features?.find(
-    (f) => f.category === DEVICE_FEATURE_CATEGORIES.SWITCH || f.category === DEVICE_FEATURE_CATEGORIES.LIGHT,
+    (f) =>
+      (f.category === DEVICE_FEATURE_CATEGORIES.SWITCH || f.category === DEVICE_FEATURE_CATEGORIES.LIGHT) &&
+      (f.type === DEVICE_FEATURE_TYPES.SWITCH.BINARY || f.type === DEVICE_FEATURE_TYPES.LIGHT.BINARY),
+  );
+}
+
+/**
+ * Find the brightness feature of a dimmer plug (a switch with the dimmer type).
+ * @param {object} device - A full Gladys device (with features).
+ * @returns {object|undefined} The brightness feature, or undefined.
+ * @example
+ * const feature = findBrightnessFeature(full);
+ */
+export function findBrightnessFeature(device) {
+  return device?.features?.find(
+    (f) => f.category === DEVICE_FEATURE_CATEGORIES.SWITCH && f.type === DEVICE_FEATURE_TYPES.SWITCH.DIMMER,
   );
 }

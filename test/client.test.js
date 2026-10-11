@@ -4,7 +4,7 @@ import net from 'node:net';
 import tplinkSmarthomeApi from 'tplink-smarthome-api';
 import { encryptWithHeader, decrypt } from 'tplink-smarthome-crypto';
 import { createClient } from '../src/tplink/client.js';
-import { PLUG_SYSINFO } from './helpers/fakeTpLink.js';
+import { PLUG_SYSINFO, DIMMER_SYSINFO } from './helpers/fakeTpLink.js';
 
 // Stand-in for a `tplink-smarthome-api` Client: the wrapper takes one through
 // its `{ client }` injection hook, so the driver itself is never touched.
@@ -38,6 +38,7 @@ function createFakeDriver({ sysInfo = PLUG_SYSINFO, failOnGetSysInfo, latencyMs 
         send('get_sysinfo', host, sendOptions);
       }
       return {
+        supportsDimmer: 'brightness' in current,
         async getSysInfo(options) {
           send('get_sysinfo', host, options);
           return current;
@@ -45,6 +46,12 @@ function createFakeDriver({ sysInfo = PLUG_SYSINFO, failOnGetSysInfo, latencyMs 
         async setPowerState(on, options) {
           send('set_power', host, options);
           current = { ...current, relay_state: on ? 1 : 0 };
+        },
+        dimmer: {
+          async setBrightness(level, options) {
+            send('set_brightness', host, options);
+            current = { ...current, brightness: level };
+          },
         },
       };
     },
@@ -154,6 +161,103 @@ test('setPowerState commands when the serial matches', async () => {
   assert.ok(driver.sends.some((s) => s.op === 'set_power'));
 });
 
+test('setBrightness sets the level then turns a dimmer on when it was off', async () => {
+  const driver = createFakeDriver({ sysInfo: { ...DIMMER_SYSINFO, relay_state: 0, brightness: 10 } });
+  const tpClient = createClient({ client: driver, now: () => driver.clock.now });
+
+  const sysInfo = await tpClient.setBrightness('192.168.1.20', 50, { expectedDeviceId: DIMMER_SYSINFO.deviceId });
+
+  assert.deepEqual(
+    driver.sends.map((s) => s.op),
+    ['get_sysinfo', 'set_brightness', 'set_power', 'get_sysinfo'],
+  );
+  assert.equal(sysInfo.brightness, 50); // read back
+  assert.equal(sysInfo.relay_state, 1);
+});
+
+test('setBrightness leaves the relay alone when the dimmer is already on', async () => {
+  const driver = createFakeDriver({ sysInfo: DIMMER_SYSINFO });
+  const tpClient = createClient({ client: driver, now: () => driver.clock.now });
+
+  const sysInfo = await tpClient.setBrightness('192.168.1.20', 50);
+
+  assert.deepEqual(
+    driver.sends.map((s) => s.op),
+    ['get_sysinfo', 'set_brightness', 'get_sysinfo'],
+  );
+  assert.equal(sysInfo.brightness, 50);
+});
+
+test('setBrightness refuses to command an address held by another device', async () => {
+  const driver = createFakeDriver({ sysInfo: DIMMER_SYSINFO });
+  const tpClient = createClient({ client: driver });
+
+  await assert.rejects(
+    () => tpClient.setBrightness('192.168.1.20', 50, { expectedDeviceId: 'SOMEONE_ELSE' }),
+    /Another device now answers at 192\.168\.1\.20/,
+  );
+  assert.deepEqual(
+    driver.sends.map((s) => s.op),
+    ['get_sysinfo'],
+  );
+});
+
+test('setBrightness refuses a device without dimmer support, before sending anything', async () => {
+  const driver = createFakeDriver({ sysInfo: PLUG_SYSINFO });
+  const tpClient = createClient({ client: driver });
+
+  await assert.rejects(
+    () => tpClient.setBrightness('192.168.1.10', 50),
+    (err) => {
+      assert.match(err.message, /has no dimmer control: 192\.168\.1\.10/);
+      assert.equal(err.userFacing, true);
+      return true;
+    },
+  );
+  assert.deepEqual(
+    driver.sends.map((s) => s.op),
+    ['get_sysinfo'],
+  );
+});
+
+test('setBrightness stops with a budget error when the budget runs out before the dimmer command', async () => {
+  // The identity check alone uses the whole budget: nothing must be sent after it.
+  const driver = createFakeDriver({ sysInfo: DIMMER_SYSINFO, latencyMs: 4000 });
+  const tpClient = createClient({ client: driver, now: () => driver.clock.now });
+
+  await assert.rejects(() => tpClient.setBrightness('192.168.1.20', 50), /budget exhausted/);
+  assert.deepEqual(
+    driver.sends.map((s) => s.op),
+    ['get_sysinfo'],
+  );
+});
+
+test('setBrightness keeps all its round-trips within the Gladys ack window', async () => {
+  // Four round-trips at 1.9s each, with the dimmer off: the budget must cut them short.
+  const driver = createFakeDriver({ sysInfo: { ...DIMMER_SYSINFO, relay_state: 0 }, latencyMs: 1900 });
+  const tpClient = createClient({ client: driver, now: () => driver.clock.now });
+
+  await tpClient.setBrightness('192.168.1.20', 50);
+
+  for (const { op, timeout, startedAt } of driver.sends) {
+    assert.ok(timeout > 0 && timeout <= 2000, `${op} timeout ${timeout}`);
+    assert.ok(startedAt + timeout <= 4000, `${op} may end at ${startedAt + timeout}ms`);
+  }
+});
+
+test('setBrightness returns null when there is no time left to read the state back', async () => {
+  // The level and the power-on were applied: running out of budget for the
+  // read-back must not turn the command into a failure.
+  const driver = createFakeDriver({ sysInfo: { ...DIMMER_SYSINFO, relay_state: 0 }, latencyMs: 1500 });
+  const tpClient = createClient({ client: driver, now: () => driver.clock.now });
+
+  assert.equal(await tpClient.setBrightness('192.168.1.20', 50), null);
+  assert.deepEqual(
+    driver.sends.map((s) => s.op),
+    ['get_sysinfo', 'set_brightness', 'set_power'],
+  );
+});
+
 // --- Against the real driver ------------------------------------------------
 // The fake above encodes what each driver call costs; this checks that model
 // against the real `tplink-smarthome-api`, talking to a fake Kasa device over
@@ -170,8 +274,8 @@ const FULL_PLUG_SYSINFO = {
   err_code: 0,
 };
 
-async function startFakeKasaDevice() {
-  const state = { sysInfo: { ...FULL_PLUG_SYSINFO }, connections: 0 };
+async function startFakeKasaDevice(initial = FULL_PLUG_SYSINFO) {
+  const state = { sysInfo: { ...initial }, connections: 0 };
   const server = net.createServer((socket) => {
     state.connections += 1;
     let buffer = Buffer.alloc(0);
@@ -185,6 +289,9 @@ async function startFakeKasaDevice() {
       if (request.system?.set_relay_state) {
         state.sysInfo.relay_state = request.system.set_relay_state.state;
         response = { system: { set_relay_state: { err_code: 0 } } };
+      } else if (request['smartlife.iot.dimmer']?.set_brightness) {
+        state.sysInfo.brightness = request['smartlife.iot.dimmer'].set_brightness.brightness;
+        response = { 'smartlife.iot.dimmer': { set_brightness: { err_code: 0 } } };
       } else {
         response = { system: { get_sysinfo: state.sysInfo } };
       }
@@ -215,6 +322,22 @@ test('with the real driver, a poll costs one round-trip and a command three', as
     device.state.connections = 0;
     const sysInfo = await tpClient.setPowerState('127.0.0.1', true, { expectedDeviceId: PLUG_SYSINFO.deviceId });
     assert.equal(device.state.connections, 3);
+    assert.equal(sysInfo.relay_state, 1);
+  } finally {
+    await device.close();
+  }
+});
+
+test('with the real driver, a dimmer command costs four round-trips and sets the level', async () => {
+  const device = await startFakeKasaDevice({ ...FULL_PLUG_SYSINFO, ...DIMMER_SYSINFO, relay_state: 0 });
+  try {
+    const tpClient = createClient({ client: realDriverOnPort(device.port) });
+
+    const sysInfo = await tpClient.setBrightness('127.0.0.1', 50, { expectedDeviceId: DIMMER_SYSINFO.deviceId });
+    assert.equal(device.state.connections, 4);
+    assert.equal(device.state.sysInfo.brightness, 50);
+    assert.equal(device.state.sysInfo.relay_state, 1);
+    assert.equal(sysInfo.brightness, 50);
     assert.equal(sysInfo.relay_state, 1);
   } finally {
     await device.close();
