@@ -26,10 +26,11 @@ _Captured on a Gladys 5.1 dashboard with simulated devices and states — values
 
 ## Supported devices
 
-| TP-Link type (`sysinfo.type`)                        | Gladys device | Feature           |
-| ---------------------------------------------------- | ------------- | ----------------- |
-| `IOT.SMARTPLUGSWITCH`, `IOT.RANGEEXTENDER.SMARTPLUG` | Plug / switch | On/Off (`switch`) |
-| `IOT.SMARTBULB`                                      | Bulb          | On/Off (`light`)  |
+| TP-Link type (`sysinfo.type`)                            | Gladys device | Feature                                                        |
+| -------------------------------------------------------- | ------------- | -------------------------------------------------------------- |
+| `IOT.SMARTPLUGSWITCH`, `IOT.RANGEEXTENDER.SMARTPLUG`     | Plug / switch | On/Off only (`switch`)                                         |
+| `IOT.SMARTPLUGSWITCH` with a `brightness` (HS220, ES20M) | Dimmer        | On/Off (`switch`) and brightness slider 1–100 % (`brightness`) |
+| `IOT.SMARTBULB`                                          | Bulb          | On/Off (`light`)                                               |
 
 Other TP-Link types are detected during a scan and reported in the logs, but not
 published (no controllable feature). This matches what the core service handles.

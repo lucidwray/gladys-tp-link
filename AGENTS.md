@@ -41,7 +41,8 @@ Project-specific notes. Generic rules live in `CLAUDE.md`, the file map and user
   never published.
 - Device params `TP_LINK_IP_ADDRESS`, `TP_LINK_SERIAL_NUMBER` and `TP_LINK_MODEL` are the core service's names.
   Polls and commands read the IP and serial back from these params.
-- Features: plug → `switch`/`binary`, bulb → `light`/`binary`. `findOnOffFeature` finds the feature by category
+- Features: plug → `switch`/`binary` only, bulb → `light`/`binary`. A dimmer (sysinfo `brightness`, HS220/ES20M) also gets a
+  `brightness` feature, a switch of the dimmer type (`findBrightnessFeature`). `findOnOffFeature` finds the feature by category
   (switch or light), not by its external id.
 - The only config key is `poll_frequency`, in seconds, stored as a string by the select. It is written onto the device
   as `poll_frequency * 1000` ms. Core accepts only 1/2/10/15/30/60 s, and any other value makes

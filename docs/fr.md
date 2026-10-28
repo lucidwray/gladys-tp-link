@@ -6,10 +6,11 @@ et communique avec vos appareils via le protocole LAN Kasa classique.
 
 ## Appareils pris en charge
 
-| Appareil                | Fonctionnalité          |
-| ----------------------- | ----------------------- |
-| Prises et interrupteurs | Marche/Arrêt (`switch`) |
-| Ampoules                | Marche/Arrêt (`light`)  |
+| Appareil                  | Fonctionnalité                                               |
+| ------------------------- | ------------------------------------------------------------ |
+| Prises et interrupteurs   | Marche/Arrêt uniquement (`switch`)                           |
+| Variateurs (HS220, ES20M) | Marche/Arrêt et curseur de luminosité 1–100 % (`brightness`) |
+| Ampoules                  | Marche/Arrêt (`light`)                                       |
 
 Les autres types TP-Link sont détectés lors d'un scan et signalés dans les logs,
 mais ne sont pas publiés car ils n'ont pas encore de fonctionnalité contrôlable.

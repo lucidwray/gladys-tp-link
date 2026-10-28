@@ -21,6 +21,7 @@ import { toUserFacingError } from './errors.js';
 const logger = createLogger({ name: 'tp-link-set-value' });
 
 const CONTROLLABLE_CATEGORIES = [DEVICE_FEATURE_CATEGORIES.SWITCH, DEVICE_FEATURE_CATEGORIES.LIGHT];
+const BRIGHTNESS_MIN = 1;
 const BRIGHTNESS_MAX = 100;
 
 /**
@@ -44,22 +45,24 @@ function readRequestedPower(value) {
 }
 
 /**
- * Coerce and validate the requested brightness of a dimmer.
+ * Coerce and validate the requested brightness of a dimmer. A brightness never
+ * turns a dimmer off: the value is rounded, then clamped to 1-100.
  * @param {unknown} value - The value Gladys sent.
- * @returns {number} The integer level, 0 (off) to 100.
- * @throws {Error} When the value is not a number between 0 and 100.
+ * @returns {number} The integer level, 1 to 100.
+ * @throws {Error} When the value is not a number or is NaN.
  * @example
  * readRequestedBrightness('50.4'); // 50
+ * readRequestedBrightness(0); // 1
  */
 function readRequestedBrightness(value) {
-  // Only numbers and numeric strings: '' and null would coerce to 0 (off).
+  // Only numbers and numeric strings: '' and null would coerce to 0.
   const numeric = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
-  if (typeof numeric !== 'number' || !Number.isFinite(numeric) || numeric < 0 || numeric > BRIGHTNESS_MAX) {
+  if (typeof numeric !== 'number' || Number.isNaN(numeric)) {
     const err = new Error(`Unsupported value for a brightness control: ${value}`);
     err.userFacing = true;
     throw err;
   }
-  return Math.round(numeric);
+  return Math.min(BRIGHTNESS_MAX, Math.max(BRIGHTNESS_MIN, Math.round(numeric)));
 }
 
 /**
@@ -97,43 +100,38 @@ async function sendCommand(gladys, { device, full, host }, send) {
 }
 
 /**
- * Apply a brightness to a dimmer: a level from 1 to 100 turns it on at that
- * level, 0 turns it off. Publishes the on-off and brightness states read back
- * from the device.
+ * Apply a brightness to a dimmer: the level, clamped to 1-100, turns it on at
+ * that level. A dimmer is turned off only through its on-off feature. Publishes
+ * the on-off and brightness states read back from the device.
  * @param {object} gladys - The GladysIntegration SDK instance.
  * @param {object} tpClient - The TP-Link client wrapper.
  * @param {object} params - The command.
  * @param {object} params.device - The target device.
  * @param {object} params.feature - The brightness feature.
- * @param {number} params.value - The requested brightness (0-100).
+ * @param {number} params.value - The requested brightness, clamped to 1-100.
  * @returns {Promise<void>} Resolves once the states have been published.
- * @throws {Error} When the value is invalid or the command failed.
+ * @throws {Error} When the value is not a number or the command failed.
  * @example
  * await handleBrightness(gladys, tpClient, { device, feature, value: 50 });
  */
 async function handleBrightness(gladys, tpClient, { device, feature, value }) {
   const level = readRequestedBrightness(value);
-  const on = level > 0;
   const { full, host, serial } = await resolveTarget(gladys, device);
   const expected = { expectedDeviceId: serial };
-  logger.info(`Setting ${device.external_id} -> ${on ? `${level}%` : 'OFF'} (${host})`);
+  logger.info(`Setting ${device.external_id} -> ${level}% (${host})`);
 
   const sysInfo = await sendCommand(gladys, { device, full, host }, () =>
-    on ? tpClient.setBrightness(host, level, expected) : tpClient.setPowerState(host, false, expected),
+    tpClient.setBrightness(host, level, expected),
   );
 
   // Each state falls back to what was requested when the read-back is missing
-  // or unusable, as the on-off path does. Brightness is not requested for 0:
-  // the level is kept, so there is nothing new to fall back to.
+  // or unusable, as the on-off path does. A brightness always turns the dimmer on.
   const onOffFeature = findOnOffFeature(full);
   if (onOffFeature) {
     const relay = sysInfo ? readOnOff(classify(sysInfo), sysInfo) : undefined;
-    await publishFeatureState(gladys, onOffFeature.external_id, typeof relay === 'number' ? relay : Number(on));
+    await publishFeatureState(gladys, onOffFeature.external_id, typeof relay === 'number' ? relay : 1);
   }
-  const brightness = readBrightness(sysInfo) ?? (on ? level : undefined);
-  if (brightness !== undefined) {
-    await publishFeatureState(gladys, feature.external_id, brightness);
-  }
+  await publishFeatureState(gladys, feature.external_id, readBrightness(sysInfo) ?? level);
 }
 
 /**
@@ -144,7 +142,7 @@ async function handleBrightness(gladys, tpClient, { device, feature, value }) {
  * @param {object} params.device - The target device.
  * @param {object} params.feature - The target feature.
  * @param {number} params.value - The requested value: 1 = on, 0 = off; for a
- *   dimmer's brightness feature, 0-100.
+ *   dimmer's brightness feature, clamped to 1-100.
  * @returns {Promise<void>} Resolves once the state has been published.
  * @throws {Error} When the feature is not controllable or the command failed.
  * @example

@@ -228,7 +228,7 @@ test('handleSetValue rounds a non-integer brightness and accepts a numeric strin
   );
 });
 
-test('handleSetValue turns a dimmer off at brightness 0 and keeps its stored level', async () => {
+test('handleSetValue clamps a brightness of 0 to 1 and does not turn the dimmer off', async () => {
   const gladys = createFakeGladys();
   const tpClient = createFakeTpLink({ byHost: { '192.168.1.20': DIMMER_SYSINFO } });
   const device = buildDimmer(gladys);
@@ -236,21 +236,48 @@ test('handleSetValue turns a dimmer off at brightness 0 and keeps its stored lev
 
   await handleSetValue(gladys, tpClient, { device, feature: brightness, value: 0 });
 
-  assert.deepEqual(tpClient.brightnessCommands, []); // the level is not overwritten with 0
-  assert.deepEqual(tpClient.powerCommands, [{ host: '192.168.1.20', on: false }]);
-  // The read-back still reports the stored level, so it is what gets published.
+  assert.deepEqual(tpClient.brightnessCommands, [{ host: '192.168.1.20', level: 1 }]);
+  assert.deepEqual(tpClient.powerCommands, []);
   assert.deepEqual(gladys.published, [
-    { featureExternalId: onOff.external_id, state: 0 },
-    { featureExternalId: brightness.external_id, state: DIMMER_SYSINFO.brightness },
+    { featureExternalId: onOff.external_id, state: 1 },
+    { featureExternalId: brightness.external_id, state: 1 },
   ]);
 });
 
-test('handleSetValue rejects a brightness outside 0-100 or not a number', async () => {
+test('handleSetValue clamps a brightness to 1-100 and rounds it to an integer', async () => {
+  const gladys = createFakeGladys();
+  const tpClient = createFakeTpLink({ byHost: { '192.168.1.20': DIMMER_SYSINFO } });
+  const device = buildDimmer(gladys);
+  const brightness = device.features[1];
+
+  for (const value of [0, 0.3, -5, 100.4, 150, 55.6]) {
+    await handleSetValue(gladys, tpClient, { device, feature: brightness, value });
+  }
+
+  assert.deepEqual(
+    tpClient.brightnessCommands.map((c) => c.level),
+    [1, 1, 1, 100, 100, 56],
+  );
+  assert.deepEqual(tpClient.powerCommands, []);
+});
+
+test('handleSetValue turns a dimmer off through its on-off feature at value 0', async () => {
   const gladys = createFakeGladys();
   const tpClient = createFakeTpLink({ byHost: { '192.168.1.20': DIMMER_SYSINFO } });
   const device = buildDimmer(gladys);
 
-  for (const value of [-1, 101, 'x', '', null, NaN]) {
+  await handleSetValue(gladys, tpClient, { device, feature: device.features[0], value: 0 });
+
+  assert.deepEqual(tpClient.powerCommands, [{ host: '192.168.1.20', on: false }]);
+  assert.deepEqual(tpClient.brightnessCommands, []);
+});
+
+test('handleSetValue rejects a brightness that is not a number', async () => {
+  const gladys = createFakeGladys();
+  const tpClient = createFakeTpLink({ byHost: { '192.168.1.20': DIMMER_SYSINFO } });
+  const device = buildDimmer(gladys);
+
+  for (const value of ['x', '', null, NaN]) {
     await assert.rejects(
       () => handleSetValue(gladys, tpClient, { device, feature: device.features[1], value }),
       /Unsupported value for a brightness control/,
@@ -288,15 +315,18 @@ test('handleSetValue publishes the requested brightness when the read-back is un
   ]);
 });
 
-test('handleSetValue publishes only the off state at brightness 0 when the read-back is unavailable', async () => {
+test('handleSetValue publishes the clamped level at brightness 0 when the read-back is unavailable', async () => {
   const gladys = createFakeGladys();
   const device = buildDimmer(gladys);
   const [onOff, brightness] = device.features;
-  const tpClient = { setPowerState: async () => null };
+  const tpClient = { setBrightness: async () => null };
 
   await handleSetValue(gladys, tpClient, { device, feature: brightness, value: 0 });
 
-  assert.deepEqual(gladys.published, [{ featureExternalId: onOff.external_id, state: 0 }]);
+  assert.deepEqual(gladys.published, [
+    { featureExternalId: onOff.external_id, state: 1 },
+    { featureExternalId: brightness.external_id, state: 1 },
+  ]);
 });
 
 test('handleSetValue publishes only the brightness when the dimmer has no on-off feature', async () => {

@@ -6,10 +6,11 @@ devices using the classic Kasa LAN protocol.
 
 ## Supported devices
 
-| Device             | Feature           |
-| ------------------ | ----------------- |
-| Plugs and switches | On/Off (`switch`) |
-| Bulbs              | On/Off (`light`)  |
+| Device                 | Feature                                                        |
+| ---------------------- | -------------------------------------------------------------- |
+| Plugs and switches     | On/Off only (`switch`)                                         |
+| Dimmers (HS220, ES20M) | On/Off (`switch`) and brightness slider 1–100 % (`brightness`) |
+| Bulbs                  | On/Off (`light`)                                               |
 
 Other TP-Link types are detected during a scan and reported in the logs, but
 they are not published because they have no controllable feature yet.
