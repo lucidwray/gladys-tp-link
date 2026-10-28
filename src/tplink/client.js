@@ -114,8 +114,8 @@ export function createClient({
      * or if it has no dimmer support.
      *
      * Two commands (level, then power) rather than the combined driver calls:
-     * their behaviour on this firmware is not verified. A level of 0 is not
-     * sent here: the caller turns the device off with setPowerState instead.
+     * their behaviour on this firmware is not verified. The caller clamps the
+     * level to 1-100; turning the device off goes through setPowerState.
      * @param {string} host - The device IP address.
      * @param {number} level - The brightness, 1 to 100.
      * @param {object} [options] - Command options.
